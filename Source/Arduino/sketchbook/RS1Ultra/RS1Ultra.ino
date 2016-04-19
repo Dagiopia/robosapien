@@ -30,8 +30,30 @@ ADXL345 adxl; //variable adxl is an instance of the ADXL345 library
 HMC5883L compass;
 #endif
 
+
+////////////////////////////////////////////
+#include<Stepper.h>
+
+#define DEF_RATE 7 //FOR 254 DISCRETE POSITIONS : i.e. degree is from 0 to 354
+#define LEFT_FINAL 11 //YELLOW WIRE
+#define RIGHT_FINAL 12//RED WIRE
+#define MIN_DEGREE 0
+#define MAX_DEGREE 354
+#define DIFF_STEPPER 135
+/** The above constant is needed because the camera stepper can turn from 0 to 354 degrees
+  * but the pan/tilt commands come for 0 - 90 degrees and since 180 degreees on the camera stepper is 
+  * equivalent to 45 degreee on the servo... the diff is 135 so that a servo 0 degree is 135
+  * on the camera and a servo 90 degree is 225 with the center being 180 or 45 degrees for the servo
+  */
+const int stepsPerRevolution = 200;
+int current_degree = 0;
+Stepper pan_stepper(stepsPerRevolution, 3, 4, 6, 7);
+
+///////////////////////////////////////////////
+
+
 #define LISTEN_LED_PIN 7
-#define IR_IN_PIN 3
+#define IR_IN_PIN 2
 //90 degree motor gives prob
 #define MAX_A 90
 #define MAX_B 90
@@ -735,7 +757,8 @@ int readRegister(int deviceAddress, byte address){
 //sonar begin
 void sonarDist()
 {
-  int a=digitalRead(sonarIn);
+  //int a=digitalRead(sonarIn);
+  int a = 0;
   if(a){
     start_time=micros();
   }else if (!done){
@@ -980,6 +1003,41 @@ void printDist()
   Serial.print("!d");
   Serial.println(distance);
 }
+
+/////////////////////////////////////////////////////////////////
+void set_zero()
+{
+	int counter = 0;
+	while(digitalRead(LEFT_FINAL) != HIGH){
+		pan_stepper.step(-DEF_RATE);
+		counter++;
+	}
+	current_degree = MIN_DEGREE;
+}
+
+void set_max()
+{
+	int counter = 0;
+	while(digitalRead(RIGHT_FINAL) != HIGH){
+		pan_stepper.step(DEF_RATE);
+		counter++;
+	}
+	current_degree = MAX_DEGREE;
+}
+
+
+void set_pos(int deg)
+{
+	int steps = (deg > current_degree)? (DEF_RATE) : (-DEF_RATE);
+	int iter = (deg > current_degree)? (deg - current_degree) : (current_degree - deg);
+	for(int i = 0; i < iter; i++){
+		pan_stepper.step(steps);
+		current_degree += (steps > 0)? 1 : -1;
+	}
+}
+
+
+
 void setup()
 {
   //
@@ -992,11 +1050,19 @@ void setup()
         while(!Serial){;}
         pinMode(LISTEN_LED_PIN,OUTPUT);
         pinMode(IR_IN_PIN,INPUT);
-	pinMode(sonarIn,INPUT);
+	//pinMode(sonarIn,INPUT);
 	pinMode(sonarTrig,OUTPUT);
 	pinMode(IRout,OUTPUT);
         digitalWrite(IRout,HIGH);
         digitalWrite(LISTEN_LED_PIN,LOW);
+        
+        ////////////////////////////////////////////////////
+          pan_stepper.setSpeed(60);
+	  pinMode(LEFT_FINAL, INPUT);
+	  pinMode(RIGHT_FINAL, INPUT);
+	  set_zero();
+        
+        
 //	Serial.println("starting up L3G4200D");
 #ifdef GESTURE_R
   ///////Sensor Init
@@ -1098,9 +1164,13 @@ void loop()
             if(panORtilt){
               if (ang>MAX_A)ang=MAX_A;
               panServo.write(ang+DIFF_A);
+              set_pos(ang+DIFF_STEPPER);	//THE DIFF IS NEEDED CUZ THE CAMERA CAN TURN FROM 0 - 354 DEGREES
+              Serial.print("Angle = ");
+              Serial.println(ang+DIFF_A);
             }else{
               if (ang>MAX_B)ang=MAX_B;
               tiltServo.write(ang+DIFF_B);
+              
             }
         }else{//robot
               RSSendCommand(c1b*0x10+c2b);
